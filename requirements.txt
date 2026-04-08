@@ -3,3 +3,9 @@ bs4
 # json
 requests
 # time
+faiss-cpu
+sentence-transformers
+groq
+pandas
+python-dotenv
+streamlit

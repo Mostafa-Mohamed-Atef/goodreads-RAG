@@ -7,28 +7,31 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 from groq import Groq
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # -----------------------------
 # 1. CONFIGURATION
 # -----------------------------
 # Set your OpenAI API key
-openai.api_key = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 # Embedding model
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 # Generative model
-GEN_MODEL = "gpt-3.5-turbo"
+GEN_MODEL = "llama-3.1-8b-instant"
 
 # Number of retrieved chunks
-TOP_K = 5
+TOP_K = 10
 
 # -----------------------------
 # 2. LOAD YOUR SCRAPED DATA
 # -----------------------------
 # Example: CSV with columns: id, text, title, author, source_url
-data = pd.read_csv("scraped_books.csv")
+data = pd.read_csv("Data/goodreads_top100_full.csv")
+cols_to_embed = ["title", "author", "rating", "ratings_count", "reviews_count", "description", "format", "language", "published"]
+data["text"] = data.apply(lambda row: "\n".join([f"{col.capitalize()}: {row[col]}" for col in cols_to_embed if pd.notna(row[col])]), axis=1)
 texts = data["text"].tolist()
 
 # -----------------------------
@@ -37,7 +40,9 @@ texts = data["text"].tolist()
 print("Generating embeddings...")
 embedder = SentenceTransformer(EMBEDDING_MODEL)
 embeddings = embedder.encode(texts, convert_to_numpy=True)
-
+print("Total rows in CSV:", len(data))
+print("Total texts:", len(texts))
+print("Embeddings shape:", embeddings.shape)
 # -----------------------------
 # 4. VECTOR STORE (FAISS)
 # -----------------------------
@@ -52,10 +57,19 @@ metadata = data.to_dict(orient="records")
 # -----------------------------
 # 5. RETRIEVAL FUNCTION
 # -----------------------------
-def retrieve_chunks(question, top_k=TOP_K):
+def retrieve_chunks(question, top_k=5):
     question_vec = embedder.encode([question])
     distances, indices = index.search(question_vec, top_k)
-    retrieved = [metadata[i]["text"] for i in indices[0]]
+
+    print("\nTop indices:", indices[0])
+    print("\nDistances:", distances[0])
+
+    retrieved = []
+    for i in indices[0]:
+        print("\n--- Chunk Preview ---")
+        print(metadata[i]["text"][:200])
+        retrieved.append(metadata[i]["text"])
+
     return retrieved
 
 # -----------------------------
@@ -74,16 +88,16 @@ def generate_answer(question, retrieved_chunks):
     {question}
     """
     
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model=GEN_MODEL,
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": prompt}
         ],
-        temperature=0.0
+        temperature=0.7
     )
     
-    return response['choices'][0]['message']['content'].strip()
+    return response.choices[0].message.content.strip()
 
 # -----------------------------
 # 7. EXAMPLE USAGE
