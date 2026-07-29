@@ -1,165 +1,65 @@
-# RAG Pipeline: Python Implementation
-# Requirements: pip install openai faiss-cpu pandas sentence-transformers groq python-dotenv
+"""RAG pipeline orchestrator — wires Embedder, FAISSIndexer, Retriever, Generator."""
 
 from __future__ import annotations
 
-import os
+import logging
+import time
 from pathlib import Path
 
-import faiss
-import pandas as pd
-from sentence_transformers import SentenceTransformer
-from groq import Groq
-from dotenv import load_dotenv
+from rag.config import settings
+from rag.embedder import Embedder
+from rag.generator import Generator
+from rag.indexer import FAISSIndexer
+from rag.retriever import Retriever
 
-load_dotenv()
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DATA_DIR = PROJECT_ROOT / "Data"
-
-EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
-GEN_MODEL = "llama-3.3-70b-versatile"
-DEFAULT_TOP_K = 10
+log = logging.getLogger(__name__)
 
 
 class RAGPipeline:
-    """Goodreads book corpus: embed, retrieve with FAISS, answer with Groq."""
+    """High-level orchestrator for the full RAG flow."""
 
-    def __init__(self, data_dir: Path | str | None = None, verbose: bool = True):
-        self.verbose = verbose
-        data_dir = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
-        
-        if not data_dir.is_dir():
-            raise FileNotFoundError(f"Data directory not found: {data_dir}")
+    def __init__(
+        self,
+        *,
+        index_dir: Path | None = None,
+        auto_load: bool = True,
+    ) -> None:
+        log.info("Initialising RAG pipeline…")
+        t0 = time.perf_counter()
 
-        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        if not os.getenv("GROQ_API_KEY"):
-            raise ValueError("GROQ_API_KEY is not set in environment or .env")
+        self.embedder = Embedder()
+        self.indexer = FAISSIndexer(index_dir=index_dir)
 
-        # Load all goodreads CSV files
-        csv_files = list(data_dir.glob("goodreads_*.csv"))
-        if not csv_files:
-            raise FileNotFoundError(f"No goodreads CSV files found in {data_dir}")
+        if auto_load and self.indexer.is_built():
+            self.indexer.load()
+        elif auto_load:
+            log.warning(
+                "No persisted index found at %s — run `python -m rag.build_index` first.",
+                self.indexer.index_dir,
+            )
 
-        if self.verbose:
-            print(f"Loading data from: {[f.name for f in csv_files]}")
+        self.retriever = Retriever(self.embedder, self.indexer)
+        self.generator = Generator()
 
-        data_frames = []
-        for f in csv_files:
-            df = pd.read_csv(f)
-            data_frames.append(df)
-        
-        data = pd.concat(data_frames, ignore_index=True)
-        
-        # Deduplicate by URL if possible
-        if "url" in data.columns:
-            data = data.drop_duplicates(subset=["url"])
+        elapsed = time.perf_counter() - t0
+        log.info("Pipeline ready in %.2fs", elapsed)
 
-        cols_to_embed = [
-            "title",
-            "author",
-            "rating",
-            "ratings_count",
-            "reviews_count",
-            "description",
-            "format",
-            "language",
-            "published",
-        ]
-        
-        # Ensure columns exist before embedding
-        available_cols = [c for c in cols_to_embed if c in data.columns]
-        
-        data["text"] = data.apply(
-            lambda row: "\n".join(
-                [f"{col.capitalize()}: {row[col]}" for col in available_cols if pd.notna(row[col])]
-            ),
-            axis=1,
-        )
-        self.texts = data["text"].tolist()
-        self.metadata = data.to_dict(orient="records")
+    def query(self, question: str, top_k: int | None = None) -> dict:
+        """Run the full RAG pipeline: retrieve → generate → return structured result."""
+        k = top_k or settings.default_top_k
 
-        if self.verbose:
-            print(f"Generating embeddings for {len(self.texts)} items...")
-        self.embedder = SentenceTransformer(EMBEDDING_MODEL)
-        embeddings = self.embedder.encode(self.texts, convert_to_numpy=True)
-        if self.verbose:
-            print("Embeddings shape:", embeddings.shape)
+        log.info("Pipeline query: %r (top_k=%d)", question[:80], k)
+        t0 = time.perf_counter()
 
-        dimension = embeddings.shape[1]
-        self.index = faiss.IndexFlatL2(dimension)
-        self.index.add(embeddings)
-        if self.verbose:
-            print(f"FAISS index built with {self.index.ntotal} vectors.")
+        hits = self.retriever.retrieve(question, k)
+        chunks = [h[0].get("text", "") for h in hits]
+        answer = self.generator.answer(question, chunks)
 
-    def retrieve_chunks(self, question: str, top_k: int = 5) -> list[str]:
-        question_vec = self.embedder.encode([question])
-        distances, indices = self.index.search(question_vec, top_k)
+        elapsed = time.perf_counter() - t0
+        log.info("Pipeline query completed in %.2fs", elapsed)
 
-        if self.verbose:
-            print("\nTop indices:", indices[0])
-            print("\nDistances:", distances[0])
-
-        retrieved: list[str] = []
-        for i in indices[0]:
-            if self.verbose:
-                print("\n--- Chunk Preview ---")
-                print(self.metadata[i]["text"][:200])
-            retrieved.append(self.metadata[i]["text"])
-        return retrieved
-
-    def retrieve_with_meta(
-        self, question: str, top_k: int = 5
-    ) -> list[tuple[dict, float]]:
-        """Return (row dict, L2 distance) for each hit."""
-        question_vec = self.embedder.encode([question])
-        distances, indices = self.index.search(question_vec, top_k)
-        out: list[tuple[dict, float]] = []
-        for idx, dist in zip(indices[0], distances[0]):
-            out.append((self.metadata[idx], float(dist)))
-        return out
-
-    def generate_answer(self, question: str, retrieved_chunks: list[str]) -> str:
-        context = "\n\n".join(retrieved_chunks)
-        prompt = f"""
-    You are an expert on the scraped Goodreads book corpus.
-    Use the provided context to answer the user's question accurately.
-
-    - Answer ONLY based on the context below.
-    - If the context does not contain enough information to answer the question, or if the question is unrelated to the books provided, say "I'm sorry, but I don't have enough information in my database to answer that."
-    - Do NOT start your answer with "I don't know" if you are going to provide information from the context.
-
-    Context:
-    {context}
-
-    Question:
-    {question}
-    """
-
-        response = self.client.chat.completions.create(
-            model=GEN_MODEL,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.7,
-        )
-
-        return response.choices[0].message.content.strip()
-
-
-def main() -> None:
-    pipeline = RAGPipeline(verbose=True)
-    while True:
-        question = input("Ask a question (or 'exit' to quit): ")
-        if question.lower() == "exit":
-            break
-
-        chunks = pipeline.retrieve_chunks(question, top_k=DEFAULT_TOP_K)
-        answer = pipeline.generate_answer(question, chunks)
-        print("\nAnswer:", answer)
-        print("-" * 50)
-
-
-if __name__ == "__main__":
-    main()
+        return {
+            "answer": answer,
+            "hits": hits,
+            "latency_ms": round(elapsed * 1000, 2),
+        }

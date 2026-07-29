@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Ask questions about Goodreads books using AI-powered retrieval augmented generation">
+    <title>Goodreads RAG — AI Book Q&A</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <!-- ── Background effects ─────────────────────────────── -->
+    <div class="bg-grid"></div>
+    <div class="bg-glow bg-glow--1"></div>
+    <div class="bg-glow bg-glow--2"></div>
+
+    <!-- ── Main layout ────────────────────────────────────── -->
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header__logo">
+                <span class="header__icon">📚</span>
+                <h1 class="header__title">Goodreads RAG</h1>
+            </div>
+            <p class="header__subtitle">AI-powered book search &amp; Q&amp;A over the Goodreads corpus</p>
+            <div class="header__badge" id="status-badge">
+                <span class="header__badge-dot"></span>
+                <span class="header__badge-text">Connecting…</span>
+            </div>
+        </header>
+
+        <!-- Search Section -->
+        <main class="main">
+            <section class="search-card glass" id="search-section">
+                <label for="question-input" class="search-card__label">Ask anything about the books</label>
+                <div class="search-card__input-group">
+                    <textarea
+                        id="question-input"
+                        class="search-card__textarea"
+                        placeholder="e.g. Which highly rated books are available in Arabic?"
+                        rows="3"
+                        maxlength="1000"
+                    ></textarea>
+                    <div class="search-card__char-count">
+                        <span id="char-count">0</span>/1000
+                    </div>
+                </div>
+
+                <div class="search-card__controls">
+                    <div class="search-card__slider-group">
+                        <label for="topk-slider" class="search-card__slider-label">
+                            Books to retrieve: <strong id="topk-value">5</strong>
+                        </label>
+                        <input type="range" id="topk-slider" class="search-card__slider" min="1" max="20" value="5">
+                    </div>
+                    <button id="ask-btn" class="btn btn--primary" disabled>
+                        <span class="btn__text">Ask</span>
+                        <span class="btn__loader" hidden>
+                            <span class="spinner"></span>
+                            Thinking…
+                        </span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Answer Section -->
+            <section class="answer-section" id="answer-section" hidden>
+                <div class="answer-card glass">
+                    <div class="answer-card__header">
+                        <h2 class="answer-card__title">✨ Answer</h2>
+                        <span class="answer-card__latency" id="latency-badge"></span>
+                    </div>
+                    <div class="answer-card__body" id="answer-body">
+                        <!-- answer text injected here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sources Section -->
+            <section class="sources-section" id="sources-section" hidden>
+                <div class="sources-header">
+                    <h2 class="sources-header__title">📖 Retrieved Sources</h2>
+                    <button class="btn btn--ghost" id="toggle-sources-btn">Hide sources</button>
+                </div>
+                <div class="sources-grid" id="sources-grid">
+                    <!-- source cards injected here -->
+                </div>
+            </section>
+
+            <!-- Error display -->
+            <div class="error-toast" id="error-toast" hidden>
+                <span class="error-toast__icon">⚠️</span>
+                <span class="error-toast__msg" id="error-msg"></span>
+                <button class="error-toast__close" id="error-close">&times;</button>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>SentenceTransformers → FAISS → Groq (LLaMA 3) &nbsp;·&nbsp; Built with FastAPI</p>
+        </footer>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>

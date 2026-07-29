@@ -1,1 +1,1 @@
-"""RAG package: Goodreads corpus retrieval and generation."""
+"""rag package: Goodreads corpus retrieval-augmented generation."""

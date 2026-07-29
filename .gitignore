@@ -2,4 +2,27 @@
 myenv/
 __pycache__
 *.pyc
-.env
+
+# Build artifacts
+dist/
+*.egg-info/
+build/
+
+# Persisted index (rebuild with: python -m rag.build_index)
+data/index/
+
+# Test / coverage
+htmlcov/
+.coverage
+.pytest_cache/
+
+# Old directories (safe to delete after migration)
+RAG_old/
+Data_old/
+
+# IDE
+.vscode/
+.idea/
+.env.example
+.gitignore
+.pre-commit-config.yaml
